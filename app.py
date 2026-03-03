@@ -7,7 +7,7 @@ st.set_page_config(page_title="Buscador de Jurisprudencia NQN", page_icon="⚖�
 # Configurar la API de Gemini usando los "Secretos" de Streamlit
 API_KEY = st.secrets["GEMINI_API_KEY"]
 genai.configure(api_key=API_KEY)
-model = genai.GenerativeModel('gemini-1.5-flash')
+model = genai.GenerativeModel('gemini-2.5-flash')
 
 # Título y encabezado principal
 st.title("⚖️ Buscador Inteligente de Jurisprudencia")
