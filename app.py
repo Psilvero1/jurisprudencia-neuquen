@@ -2,64 +2,88 @@ import streamlit as st
 import google.generativeai as genai
 import PyPDF2
 import base64
-import time  # NUEVA HERRAMIENTA para hacer pausas y no saturar la API
+
+# Nuevas herramientas profesionales para la Base de Datos Vectorial
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_google_genai import GoogleGenerativeAIEmbeddings
+from langchain_community.vectorstores import FAISS
+from langchain.schema import Document
 
 # Configuración de la página
 st.set_page_config(page_title="Buscador de Jurisprudencia NQN", page_icon="⚖️", layout="wide")
 
-# Configurar la API de Gemini
+# Configurar las llaves y el modelo
 API_KEY = st.secrets["GEMINI_API_KEY"]
 genai.configure(api_key=API_KEY)
 model = genai.GenerativeModel('gemini-2.5-flash')
 
-# --- MEMORIA AMPLIADA ---
-if 'memoria_fallos' not in st.session_state:
-    st.session_state['memoria_fallos'] = ""
-    st.session_state['cantidad_fallos'] = 0
-    st.session_state['archivos_pdf'] = {}
+# Configurar el motor de la Base de Datos Vectorial
+embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001", google_api_key=API_KEY)
 
-# Título y encabezado principal
+# --- NUEVA MEMORIA VECTORIAL ---
+if 'vector_store' not in st.session_state:
+    st.session_state['vector_store'] = None # Acá vivirá el índice inteligente
+if 'archivos_pdf' not in st.session_state:
+    st.session_state['archivos_pdf'] = {}
+if 'cantidad_fallos' not in st.session_state:
+    st.session_state['cantidad_fallos'] = 0
+
+# Título principal
 st.title("⚖️ Buscador Inteligente de Jurisprudencia")
 st.subheader("Provincia de Neuquén")
 st.markdown("---")
 
-tab1, tab2 = st.tabs(["🔍 Buscar en mis Fallos", "📤 Subir y Resumir Jurisprudencia"])
+tab1, tab2 = st.tabs(["🔍 Buscar en mis Fallos", "📤 Carga Silenciosa de Jurisprudencia"])
 
 with tab1:
-    st.write("### Buscador con 'Candado' (Grounding)")
-    st.write(f"Fallos cargados en la memoria actual: **{st.session_state['cantidad_fallos']}**")
+    st.write("### Buscador de Precisión (Vectorial)")
+    st.write(f"Fallos indexados en la base actual: **{st.session_state['cantidad_fallos']}**")
     
-    query = st.text_input("Escribí tu consulta:")
+    query = st.text_input("Escribí tu consulta jurídica (Ej: 'Doctrina sobre carga de la prueba'):")
     
     if st.button("Buscar en mi base de datos"):
-        if st.session_state['cantidad_fallos'] == 0:
-            st.warning("⚠️ La base de datos está vacía. Por favor, andá a la pestaña de al lado y subí jurisprudencia primero.")
+        if st.session_state['vector_store'] is None:
+            st.warning("⚠️ La base de datos está vacía. Subí jurisprudencia en la otra pestaña primero.")
         elif query:
-            with st.spinner("Buscando respuestas estrictamente en tus fallos..."):
-                prompt_estricto = f"""Sos un asistente jurídico estricto. 
-                REGLA FUNDAMENTAL: Respondé a la consulta del usuario basándote ÚNICA Y EXCLUSIVAMENTE en el texto de los fallos que te proveo a continuación.
-                Si la respuesta NO se encuentra en este texto, tu única respuesta debe ser: 'No se encontraron respuestas a esta consulta en los fallos cargados en la base de datos actual'.
-                NO uses conocimiento externo, NO inventes jurisprudencia.
-                
-                MUY IMPORTANTE: Al final de tu respuesta, DEBES indicar el nombre exacto del archivo o archivos de los fallos que utilizaste para responder.
-
-                --- TEXTO DE LOS FALLOS EN LA BASE DE DATOS ---
-                {st.session_state['memoria_fallos']}
-                -----------------------------------------------
-
-                Consulta del usuario: {query}"""
-                
+            with st.spinner("Buscando los párrafos más exactos en tu archivo..."):
                 try:
+                    # 1. El buscador extrae SOLO los 5 fragmentos más relevantes de toda tu base
+                    documentos_relevantes = st.session_state['vector_store'].similarity_search(query, k=5)
+                    
+                    # 2. Unimos esos pedacitos para dárselos a la IA
+                    contexto_extraido = ""
+                    archivos_citados = set() # Usamos un 'set' para no repetir nombres de botones
+                    
+                    for doc in documentos_relevantes:
+                        nombre_origen = doc.metadata['source']
+                        archivos_citados.add(nombre_origen)
+                        contexto_extraido += f"\n--- Extraído de: {nombre_origen} ---\n{doc.page_content}\n"
+                    
+                    # 3. Le pasamos solo esa selección a la IA (Ahorro masivo de recursos)
+                    prompt_estricto = f"""Sos un asistente jurídico estricto. 
+                    REGLA FUNDAMENTAL: Respondé a la consulta basándote ÚNICA Y EXCLUSIVAMENTE en los fragmentos de jurisprudencia extraídos que te proveo abajo.
+                    Si la respuesta NO está en estos fragmentos, decí: 'No se encontraron respuestas a esta consulta en la jurisprudencia indexada'.
+                    
+                    MUY IMPORTANTE: Mencioná siempre de qué archivo/s sacaste la información.
+
+                    --- FRAGMENTOS RELEVANTES EXTRAÍDOS ---
+                    {contexto_extraido}
+                    -----------------------------------------
+
+                    Consulta del usuario: {query}"""
+                    
                     respuesta = model.generate_content(prompt_estricto)
+                    
                     st.success("Búsqueda completada:")
                     st.write(respuesta.text)
                     
+                    # --- FILTRO DE DESCARGAS ---
                     st.markdown("---")
-                    st.write("### 📄 Fallos citados en esta respuesta:")
-                    
-                    archivos_mostrados = 0
-                    for nombre_archivo, bytes_archivo in st.session_state['archivos_pdf'].items():
-                        if nombre_archivo in respuesta.text:
+                    st.write("### 📄 Fallos utilizados para esta respuesta:")
+                    for nombre_archivo in archivos_citados:
+                        # Verificamos si la IA realmente usó el texto de este archivo en su redacción
+                        if nombre_archivo in respuesta.text and nombre_archivo in st.session_state['archivos_pdf']:
+                            bytes_archivo = st.session_state['archivos_pdf'][nombre_archivo]
                             b64 = base64.b64encode(bytes_archivo).decode()
                             href = f'''
                             <a href="data:application/pdf;base64,{b64}" download="{nombre_archivo}"
@@ -68,56 +92,52 @@ with tab1:
                             </a><br><br>
                             '''
                             st.markdown(href, unsafe_allow_html=True)
-                            archivos_mostrados += 1
-                    
-                    if archivos_mostrados == 0:
-                        st.info("No hay archivos específicos para descargar vinculados a esta consulta.")
-                        
+                            
                 except Exception as e:
-                    st.error("⚠️ La Inteligencia Artificial se saturó temporalmente por exceso de datos. Por favor, esperá 1 minuto y volvé a intentar buscar.")
-
+                    st.error(f"Hubo un error en la búsqueda. Asegurate de que los archivos estén bien cargados.")
         else:
             st.warning("Por favor, escribí una consulta antes de buscar.")
 
 with tab2:
-    st.write("### Carga y Resumen Automático Múltiple")
-    uploaded_files = st.file_uploader("Subí uno o varios fallos en formato PDF", type=["pdf"], accept_multiple_files=True)
+    st.write("### Indexación Silenciosa y Escalable")
+    st.write("Subí archivos PDF sin preocuparte por el peso. El sistema los fragmentará y guardará en la base de datos sin consumir tu límite de resúmenes.")
+    
+    uploaded_files = st.file_uploader("Subí uno o varios fallos", type=["pdf"], accept_multiple_files=True)
     
     if uploaded_files:
-        if st.button("Leer, Resumir y Guardar en Memoria"):
-            with st.spinner("Procesando los expedientes... esto puede tomar unos minutos dependiendo de la cantidad."):
+        if st.button("Indexar en la Base de Datos"):
+            with st.spinner("Procesando, cortando e indexando... esto tomará unos segundos."):
                 for uploaded_file in uploaded_files:
                     try:
+                        # 1. Leer texto del PDF
                         lector_pdf = PyPDF2.PdfReader(uploaded_file)
                         texto_fallo = ""
                         for pagina in lector_pdf.pages:
-                            texto_fallo += pagina.extract_text()
+                            extraido = pagina.extract_text()
+                            if extraido:
+                                texto_fallo += extraido
                         
-                        st.session_state['memoria_fallos'] += f"\n\n--- INICIO FALLO: {uploaded_file.name} ---\n{texto_fallo}\n--- FIN FALLO ---\n"
-                        st.session_state['cantidad_fallos'] += 1
+                        # 2. CORTAR EN PEDACITOS (El secreto del éxito)
+                        # Cortamos en bloques de 1000 letras, superponiendo 200 para no cortar ideas a la mitad
+                        text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+                        fragmentos = text_splitter.split_text(texto_fallo)
+                        
+                        # 3. Preparar las etiquetas (para saber de qué PDF viene cada pedacito)
+                        docs = [Document(page_content=frag, metadata={"source": uploaded_file.name}) for frag in fragmentos]
+                        
+                        # 4. Guardar en la Base de Datos Vectorial (FAISS)
+                        if st.session_state['vector_store'] is None:
+                            st.session_state['vector_store'] = FAISS.from_documents(docs, embeddings)
+                        else:
+                            st.session_state['vector_store'].add_documents(docs)
+                        
+                        # 5. Guardar el archivo físico para descargas
                         st.session_state['archivos_pdf'][uploaded_file.name] = uploaded_file.getvalue()
+                        st.session_state['cantidad_fallos'] += 1
                         
-                        prompt_resumen = f"""Sos un abogado relator estricto de la provincia de Neuquén. 
-                        REGLA FUNDAMENTAL: Basate ÚNICAMENTE en el texto de la sentencia provista abajo. NO inventes datos.
+                        st.success(f"✔️ Fallo '{uploaded_file.name}' fragmentado e indexado correctamente ({len(fragmentos)} párrafos guardados).")
                         
-                        Hacé un resumen estructurado con:
-                        1. Autos (Carátula)
-                        2. Hechos principales
-                        3. Doctrina y Fundamentos jurídicos aplicados
-                        4. Resolución (Fallo)
-                        
-                        Texto de la sentencia:
-                        {texto_fallo}"""
-                        
-                        respuesta_resumen = model.generate_content(prompt_resumen)
-                        
-                        st.success(f"¡Fallo '{uploaded_file.name}' procesado y guardado!")
-                        with st.expander(f"Ver resumen inteligente de {uploaded_file.name}"):
-                            st.write(respuesta_resumen.text)
-                        
-                        # --- EL FRENO AUTOMÁTICO ---
-                        # Obligamos al sistema a esperar 4 segundos antes de procesar el próximo archivo
-                        time.sleep(4)
-                            
                     except Exception as e:
-                        st.error(f"⚠️ Error procesando {uploaded_file.name}. Si es por saturación de cuota, intentá subir menos archivos a la vez.")
+                        st.error(f"⚠️ Error procesando {uploaded_file.name}. Verificá que el PDF sea de texto legible.")
+                
+                st.info("¡Proceso terminado! Ya podés ir a la Pestaña 1 para hacer tus consultas jurídicas.")
