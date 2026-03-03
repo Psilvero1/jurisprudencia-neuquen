@@ -11,11 +11,10 @@ genai.configure(api_key=API_KEY)
 model = genai.GenerativeModel('gemini-2.5-flash')
 
 # --- MEMORIA AMPLIADA ---
-# Ahora también guardamos los archivos físicos (bytes) para poder descargarlos
 if 'memoria_fallos' not in st.session_state:
     st.session_state['memoria_fallos'] = ""
     st.session_state['cantidad_fallos'] = 0
-    st.session_state['archivos_pdf'] = {} # Diccionario para guardar los PDFs
+    st.session_state['archivos_pdf'] = {}
 
 # Título y encabezado principal
 st.title("⚖️ Buscador Inteligente de Jurisprudencia")
@@ -35,10 +34,13 @@ with tab1:
             st.warning("⚠️ La base de datos está vacía. Por favor, andá a la pestaña de al lado y subí un fallo primero.")
         elif query:
             with st.spinner("Buscando respuestas estrictamente en tus fallos..."):
+                # EL CANDADO ACTUALIZADO: Le exigimos que cite el nombre del archivo
                 prompt_estricto = f"""Sos un asistente jurídico estricto. 
                 REGLA FUNDAMENTAL: Respondé a la consulta del usuario basándote ÚNICA Y EXCLUSIVAMENTE en el texto de los fallos que te proveo a continuación.
                 Si la respuesta a la consulta NO se encuentra en este texto, tu única respuesta debe ser: 'No se encontraron respuestas a esta consulta en los fallos cargados en la base de datos actual'.
                 NO uses conocimiento externo, NO inventes jurisprudencia.
+                
+                MUY IMPORTANTE: Al final de tu respuesta, DEBES indicar el nombre exacto del archivo o archivos de los fallos que utilizaste para responder.
 
                 --- TEXTO DE LOS FALLOS EN LA BASE DE DATOS ---
                 {st.session_state['memoria_fallos']}
@@ -49,22 +51,29 @@ with tab1:
                 respuesta = model.generate_content(prompt_estricto)
                 st.success("Búsqueda completada:")
                 st.write(respuesta.text)
+                
+                # --- FILTRO DE DESCARGAS INTELIGENTE ---
+                # Ahora los botones están DENTRO del resultado de búsqueda y filtrados
+                st.markdown("---")
+                st.write("### 📄 Fallos citados en esta respuesta:")
+                
+                archivos_mostrados = 0
+                for nombre_archivo, bytes_archivo in st.session_state['archivos_pdf'].items():
+                    # El truco: verificamos si la IA escribió el nombre del archivo en su respuesta
+                    if nombre_archivo in respuesta.text:
+                        st.download_button(
+                            label=f"⬇️ Descargar {nombre_archivo}",
+                            data=bytes_archivo,
+                            file_name=nombre_archivo,
+                            mime="application/pdf"
+                        )
+                        archivos_mostrados += 1
+                
+                # Si la IA dijo que no encontró nada, no mostramos botones
+                if archivos_mostrados == 0:
+                    st.info("No hay archivos específicos para descargar vinculados a esta consulta.")
         else:
             st.warning("Por favor, escribí una consulta antes de buscar.")
-            
-    # --- SECCIÓN DE DESCARGAS ---
-    # Mostramos los botones de descarga si hay fallos en la memoria
-    if st.session_state['cantidad_fallos'] > 0:
-        st.markdown("---")
-        st.write("### 📄 Fallos disponibles para descargar")
-        # Creamos un botón de descarga por cada archivo guardado
-        for nombre_archivo, bytes_archivo in st.session_state['archivos_pdf'].items():
-            st.download_button(
-                label=f"⬇️ Descargar {nombre_archivo}",
-                data=bytes_archivo,
-                file_name=nombre_archivo,
-                mime="application/pdf"
-            )
 
 with tab2:
     st.write("### Carga y Resumen Automático de Fallos")
@@ -74,20 +83,15 @@ with tab2:
         if st.button("Leer, Resumir y Guardar en Memoria"):
             with st.spinner("Procesando el expediente de forma estricta..."):
                 try:
-                    # Leer el texto del PDF
                     lector_pdf = PyPDF2.PdfReader(uploaded_file)
                     texto_fallo = ""
                     for pagina in lector_pdf.pages:
                         texto_fallo += pagina.extract_text()
                     
-                    # Guardar texto en la memoria
                     st.session_state['memoria_fallos'] += f"\n\n--- INICIO FALLO: {uploaded_file.name} ---\n{texto_fallo}\n--- FIN FALLO ---\n"
                     st.session_state['cantidad_fallos'] += 1
-                    
-                    # GUARDAR EL ARCHIVO FÍSICO (NUEVO)
                     st.session_state['archivos_pdf'][uploaded_file.name] = uploaded_file.getvalue()
                     
-                    # Pedirle a Gemini que lo resuma
                     prompt_resumen = f"""Sos un abogado relator estricto de la provincia de Neuquén. 
                     REGLA FUNDAMENTAL: Basate ÚNICAMENTE en el texto de la sentencia provista abajo. NO inventes datos.
                     
