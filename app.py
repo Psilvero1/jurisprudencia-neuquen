@@ -1,7 +1,8 @@
 import streamlit as st
 import google.generativeai as genai
 import PyPDF2
-import base64  # NUEVA HERRAMIENTA para descargas sin recargar la página
+import base64
+import time  # NUEVA HERRAMIENTA para hacer pausas y no saturar la API
 
 # Configuración de la página
 st.set_page_config(page_title="Buscador de Jurisprudencia NQN", page_icon="⚖️", layout="wide")
@@ -48,46 +49,43 @@ with tab1:
 
                 Consulta del usuario: {query}"""
                 
-                respuesta = model.generate_content(prompt_estricto)
-                st.success("Búsqueda completada:")
-                st.write(respuesta.text)
-                
-                # --- FILTRO DE DESCARGAS HTML (SIN RECARGA) ---
-                st.markdown("---")
-                st.write("### 📄 Fallos citados en esta respuesta:")
-                
-                archivos_mostrados = 0
-                for nombre_archivo, bytes_archivo in st.session_state['archivos_pdf'].items():
-                    if nombre_archivo in respuesta.text:
-                        # Convertimos el PDF a un formato de texto seguro (base64) para el navegador
-                        b64 = base64.b64encode(bytes_archivo).decode()
+                try:
+                    respuesta = model.generate_content(prompt_estricto)
+                    st.success("Búsqueda completada:")
+                    st.write(respuesta.text)
+                    
+                    st.markdown("---")
+                    st.write("### 📄 Fallos citados en esta respuesta:")
+                    
+                    archivos_mostrados = 0
+                    for nombre_archivo, bytes_archivo in st.session_state['archivos_pdf'].items():
+                        if nombre_archivo in respuesta.text:
+                            b64 = base64.b64encode(bytes_archivo).decode()
+                            href = f'''
+                            <a href="data:application/pdf;base64,{b64}" download="{nombre_archivo}"
+                               style="display: inline-block; padding: 0.5em 1em; color: white; background-color: #FF4B4B; text-decoration: none; border-radius: 4px; margin-bottom: 5px;">
+                               ⬇️ Descargar {nombre_archivo}
+                            </a><br><br>
+                            '''
+                            st.markdown(href, unsafe_allow_html=True)
+                            archivos_mostrados += 1
+                    
+                    if archivos_mostrados == 0:
+                        st.info("No hay archivos específicos para descargar vinculados a esta consulta.")
                         
-                        # Creamos un enlace HTML con diseño de botón de Streamlit
-                        href = f'''
-                        <a href="data:application/pdf;base64,{b64}" download="{nombre_archivo}"
-                           style="display: inline-block; padding: 0.5em 1em; color: white; background-color: #FF4B4B; text-decoration: none; border-radius: 4px; margin-bottom: 5px;">
-                           ⬇️ Descargar {nombre_archivo}
-                        </a><br><br>
-                        '''
-                        # Mostramos el enlace en pantalla
-                        st.markdown(href, unsafe_allow_html=True)
-                        archivos_mostrados += 1
-                
-                if archivos_mostrados == 0:
-                    st.info("No hay archivos específicos para descargar vinculados a esta consulta.")
+                except Exception as e:
+                    st.error("⚠️ La Inteligencia Artificial se saturó temporalmente por exceso de datos. Por favor, esperá 1 minuto y volvé a intentar buscar.")
+
         else:
             st.warning("Por favor, escribí una consulta antes de buscar.")
 
 with tab2:
     st.write("### Carga y Resumen Automático Múltiple")
-    # Agregamos accept_multiple_files=True para permitir seleccionar varios PDFs
     uploaded_files = st.file_uploader("Subí uno o varios fallos en formato PDF", type=["pdf"], accept_multiple_files=True)
     
-    # Verificamos si la lista de archivos no está vacía
     if uploaded_files:
         if st.button("Leer, Resumir y Guardar en Memoria"):
-            with st.spinner("Procesando los expedientes... esto puede tomar un momento."):
-                # Recorremos cada archivo subido uno por uno
+            with st.spinner("Procesando los expedientes... esto puede tomar unos minutos dependiendo de la cantidad."):
                 for uploaded_file in uploaded_files:
                     try:
                         lector_pdf = PyPDF2.PdfReader(uploaded_file)
@@ -114,9 +112,12 @@ with tab2:
                         respuesta_resumen = model.generate_content(prompt_resumen)
                         
                         st.success(f"¡Fallo '{uploaded_file.name}' procesado y guardado!")
-                        # Usamos un "expansor" para que los resúmenes no ocupen toda la pantalla si subís 10 fallos
                         with st.expander(f"Ver resumen inteligente de {uploaded_file.name}"):
                             st.write(respuesta_resumen.text)
+                        
+                        # --- EL FRENO AUTOMÁTICO ---
+                        # Obligamos al sistema a esperar 4 segundos antes de procesar el próximo archivo
+                        time.sleep(4)
                             
                     except Exception as e:
-                        st.error(f"Hubo un error al procesar el archivo {uploaded_file.name}. Asegurate de que sea un PDF de texto legible.")
+                        st.error(f"⚠️ Error procesando {uploaded_file.name}. Si es por saturación de cuota, intentá subir menos archivos a la vez.")
