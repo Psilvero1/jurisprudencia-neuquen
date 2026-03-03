@@ -1,6 +1,7 @@
 import streamlit as st
 import google.generativeai as genai
 import PyPDF2
+import base64  # NUEVA HERRAMIENTA para descargas sin recargar la página
 
 # Configuración de la página
 st.set_page_config(page_title="Buscador de Jurisprudencia NQN", page_icon="⚖️", layout="wide")
@@ -31,13 +32,12 @@ with tab1:
     
     if st.button("Buscar en mi base de datos"):
         if st.session_state['cantidad_fallos'] == 0:
-            st.warning("⚠️ La base de datos está vacía. Por favor, andá a la pestaña de al lado y subí un fallo primero.")
+            st.warning("⚠️ La base de datos está vacía. Por favor, andá a la pestaña de al lado y subí jurisprudencia primero.")
         elif query:
             with st.spinner("Buscando respuestas estrictamente en tus fallos..."):
-                # EL CANDADO ACTUALIZADO: Le exigimos que cite el nombre del archivo
                 prompt_estricto = f"""Sos un asistente jurídico estricto. 
                 REGLA FUNDAMENTAL: Respondé a la consulta del usuario basándote ÚNICA Y EXCLUSIVAMENTE en el texto de los fallos que te proveo a continuación.
-                Si la respuesta a la consulta NO se encuentra en este texto, tu única respuesta debe ser: 'No se encontraron respuestas a esta consulta en los fallos cargados en la base de datos actual'.
+                Si la respuesta NO se encuentra en este texto, tu única respuesta debe ser: 'No se encontraron respuestas a esta consulta en los fallos cargados en la base de datos actual'.
                 NO uses conocimiento externo, NO inventes jurisprudencia.
                 
                 MUY IMPORTANTE: Al final de tu respuesta, DEBES indicar el nombre exacto del archivo o archivos de los fallos que utilizaste para responder.
@@ -52,62 +52,71 @@ with tab1:
                 st.success("Búsqueda completada:")
                 st.write(respuesta.text)
                 
-                # --- FILTRO DE DESCARGAS INTELIGENTE ---
-                # Ahora los botones están DENTRO del resultado de búsqueda y filtrados
+                # --- FILTRO DE DESCARGAS HTML (SIN RECARGA) ---
                 st.markdown("---")
                 st.write("### 📄 Fallos citados en esta respuesta:")
                 
                 archivos_mostrados = 0
                 for nombre_archivo, bytes_archivo in st.session_state['archivos_pdf'].items():
-                    # El truco: verificamos si la IA escribió el nombre del archivo en su respuesta
                     if nombre_archivo in respuesta.text:
-                        st.download_button(
-                            label=f"⬇️ Descargar {nombre_archivo}",
-                            data=bytes_archivo,
-                            file_name=nombre_archivo,
-                            mime="application/pdf"
-                        )
+                        # Convertimos el PDF a un formato de texto seguro (base64) para el navegador
+                        b64 = base64.b64encode(bytes_archivo).decode()
+                        
+                        # Creamos un enlace HTML con diseño de botón de Streamlit
+                        href = f'''
+                        <a href="data:application/pdf;base64,{b64}" download="{nombre_archivo}"
+                           style="display: inline-block; padding: 0.5em 1em; color: white; background-color: #FF4B4B; text-decoration: none; border-radius: 4px; margin-bottom: 5px;">
+                           ⬇️ Descargar {nombre_archivo}
+                        </a><br><br>
+                        '''
+                        # Mostramos el enlace en pantalla
+                        st.markdown(href, unsafe_allow_html=True)
                         archivos_mostrados += 1
                 
-                # Si la IA dijo que no encontró nada, no mostramos botones
                 if archivos_mostrados == 0:
                     st.info("No hay archivos específicos para descargar vinculados a esta consulta.")
         else:
             st.warning("Por favor, escribí una consulta antes de buscar.")
 
 with tab2:
-    st.write("### Carga y Resumen Automático de Fallos")
-    uploaded_file = st.file_uploader("Subí un fallo en formato PDF", type=["pdf"])
+    st.write("### Carga y Resumen Automático Múltiple")
+    # Agregamos accept_multiple_files=True para permitir seleccionar varios PDFs
+    uploaded_files = st.file_uploader("Subí uno o varios fallos en formato PDF", type=["pdf"], accept_multiple_files=True)
     
-    if uploaded_file is not None:
+    # Verificamos si la lista de archivos no está vacía
+    if uploaded_files:
         if st.button("Leer, Resumir y Guardar en Memoria"):
-            with st.spinner("Procesando el expediente de forma estricta..."):
-                try:
-                    lector_pdf = PyPDF2.PdfReader(uploaded_file)
-                    texto_fallo = ""
-                    for pagina in lector_pdf.pages:
-                        texto_fallo += pagina.extract_text()
-                    
-                    st.session_state['memoria_fallos'] += f"\n\n--- INICIO FALLO: {uploaded_file.name} ---\n{texto_fallo}\n--- FIN FALLO ---\n"
-                    st.session_state['cantidad_fallos'] += 1
-                    st.session_state['archivos_pdf'][uploaded_file.name] = uploaded_file.getvalue()
-                    
-                    prompt_resumen = f"""Sos un abogado relator estricto de la provincia de Neuquén. 
-                    REGLA FUNDAMENTAL: Basate ÚNICAMENTE en el texto de la sentencia provista abajo. NO inventes datos.
-                    
-                    Hacé un resumen estructurado con:
-                    1. Autos (Carátula)
-                    2. Hechos principales
-                    3. Doctrina y Fundamentos jurídicos aplicados
-                    4. Resolución (Fallo)
-                    
-                    Texto de la sentencia:
-                    {texto_fallo}"""
-                    
-                    respuesta_resumen = model.generate_content(prompt_resumen)
-                    
-                    st.success(f"¡Fallo '{uploaded_file.name}' procesado y guardado!")
-                    st.write("### Resumen Inteligente Estricto")
-                    st.write(respuesta_resumen.text)
-                except Exception as e:
-                    st.error(f"Hubo un error al procesar el archivo. Asegurate de que sea un PDF de texto legible.")
+            with st.spinner("Procesando los expedientes... esto puede tomar un momento."):
+                # Recorremos cada archivo subido uno por uno
+                for uploaded_file in uploaded_files:
+                    try:
+                        lector_pdf = PyPDF2.PdfReader(uploaded_file)
+                        texto_fallo = ""
+                        for pagina in lector_pdf.pages:
+                            texto_fallo += pagina.extract_text()
+                        
+                        st.session_state['memoria_fallos'] += f"\n\n--- INICIO FALLO: {uploaded_file.name} ---\n{texto_fallo}\n--- FIN FALLO ---\n"
+                        st.session_state['cantidad_fallos'] += 1
+                        st.session_state['archivos_pdf'][uploaded_file.name] = uploaded_file.getvalue()
+                        
+                        prompt_resumen = f"""Sos un abogado relator estricto de la provincia de Neuquén. 
+                        REGLA FUNDAMENTAL: Basate ÚNICAMENTE en el texto de la sentencia provista abajo. NO inventes datos.
+                        
+                        Hacé un resumen estructurado con:
+                        1. Autos (Carátula)
+                        2. Hechos principales
+                        3. Doctrina y Fundamentos jurídicos aplicados
+                        4. Resolución (Fallo)
+                        
+                        Texto de la sentencia:
+                        {texto_fallo}"""
+                        
+                        respuesta_resumen = model.generate_content(prompt_resumen)
+                        
+                        st.success(f"¡Fallo '{uploaded_file.name}' procesado y guardado!")
+                        # Usamos un "expansor" para que los resúmenes no ocupen toda la pantalla si subís 10 fallos
+                        with st.expander(f"Ver resumen inteligente de {uploaded_file.name}"):
+                            st.write(respuesta_resumen.text)
+                            
+                    except Exception as e:
+                        st.error(f"Hubo un error al procesar el archivo {uploaded_file.name}. Asegurate de que sea un PDF de texto legible.")
