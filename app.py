@@ -90,7 +90,8 @@ with tab1:
                             st.markdown(href, unsafe_allow_html=True)
                             
                 except Exception as e:
-                    st.error(f"⚠️ Error técnico con {uploaded_file.name}: {str(e)}")                else:
+                    st.error(f"Hubo un error en la búsqueda. Asegurate de que los archivos estén bien cargados.")
+        else:
             st.warning("Por favor, escribí una consulta antes de buscar.")
 
 with tab2:
@@ -127,6 +128,7 @@ with tab2:
                         st.success(f"✔️ Fallo '{uploaded_file.name}' fragmentado e indexado correctamente ({len(fragmentos)} párrafos guardados).")
                         
                     except Exception as e:
-                        st.error(f"⚠️ Error procesando {uploaded_file.name}. Verificá que el PDF sea de texto legible.")
+                        # ACÁ ESTÁ EL CÓDIGO NUEVO PARA VER EL ERROR REAL
+                        st.error(f"⚠️ Error técnico con {uploaded_file.name}: {str(e)}")
                 
                 st.info("¡Proceso terminado! Ya podés ir a la Pestaña 1 para hacer tus consultas jurídicas.")
