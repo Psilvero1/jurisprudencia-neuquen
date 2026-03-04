@@ -18,7 +18,7 @@ genai.configure(api_key=API_KEY)
 model = genai.GenerativeModel('gemini-2.5-flash')
 
 # Configurar el motor de la Base de Datos Vectorial
-embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001", google_api_key=API_KEY)
+embeddings = GoogleGenerativeAIEmbeddings(model="models/text-embedding-004", google_api_key=API_KEY)
 
 # --- NUEVA MEMORIA VECTORIAL ---
 if 'vector_store' not in st.session_state:
