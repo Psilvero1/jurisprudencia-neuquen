@@ -3,22 +3,29 @@ import google.generativeai as genai
 import PyPDF2
 import base64
 
-# Nuevas herramientas profesionales para la Base de Datos Vectorial
+# Herramientas de LangChain
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain_community.vectorstores import FAISS
 from langchain_core.documents import Document
+
+# EL NUEVO MOTOR INDEPENDIENTE (Bypass a Google)
+from langchain_community.embeddings import HuggingFaceEmbeddings
 
 # Configuración de la página
 st.set_page_config(page_title="Buscador de Jurisprudencia NQN", page_icon="⚖️", layout="wide")
 
-# Configurar las llaves y el modelo
+# Configurar la llave SOLO para redactar las respuestas finales
 API_KEY = st.secrets["GEMINI_API_KEY"]
 genai.configure(api_key=API_KEY)
-model = genai.GenerativeModel('gemini-2.5-flash')
+model = genai.GenerativeModel('gemini-1.5-flash')
 
-# Configurar el motor de la Base de Datos Vectorial
-embeddings = GoogleGenerativeAIEmbeddings(model="models/text-embedding-004", google_api_key=API_KEY)
+# --- MOTOR DE LECTURA 100% GRATUITO Y LOCAL ---
+# Usamos un modelo de HuggingFace optimizado para español
+@st.cache_resource
+def cargar_motor():
+    return HuggingFaceEmbeddings(model_name="paraphrase-multilingual-MiniLM-L12-v2")
+
+embeddings = cargar_motor()
 
 # --- NUEVA MEMORIA VECTORIAL ---
 if 'vector_store' not in st.session_state:
@@ -74,7 +81,6 @@ with tab1:
                     st.success("Búsqueda completada:")
                     st.write(respuesta.text)
                     
-                    # --- FILTRO DE DESCARGAS ---
                     st.markdown("---")
                     st.write("### 📄 Fallos utilizados para esta respuesta:")
                     for nombre_archivo in archivos_citados:
@@ -90,19 +96,19 @@ with tab1:
                             st.markdown(href, unsafe_allow_html=True)
                             
                 except Exception as e:
-                    st.error(f"Hubo un error en la búsqueda. Asegurate de que los archivos estén bien cargados.")
+                    st.error(f"Hubo un error en la búsqueda: {str(e)}")
         else:
             st.warning("Por favor, escribí una consulta antes de buscar.")
 
 with tab2:
     st.write("### Indexación Silenciosa y Escalable")
-    st.write("Subí archivos PDF sin preocuparte por el peso. El sistema los fragmentará y guardará en la base de datos sin consumir tu límite de resúmenes.")
+    st.write("Subí archivos PDF. El nuevo motor local los fragmentará y guardará en la base de datos sin consumir tu cuota de Google.")
     
     uploaded_files = st.file_uploader("Subí uno o varios fallos", type=["pdf"], accept_multiple_files=True)
     
     if uploaded_files:
         if st.button("Indexar en la Base de Datos"):
-            with st.spinner("Procesando, cortando e indexando... esto tomará unos segundos."):
+            with st.spinner("Procesando e indexando (la primera vez puede demorar unos segundos extra en arrancar el motor)..."):
                 for uploaded_file in uploaded_files:
                     try:
                         lector_pdf = PyPDF2.PdfReader(uploaded_file)
@@ -128,7 +134,6 @@ with tab2:
                         st.success(f"✔️ Fallo '{uploaded_file.name}' fragmentado e indexado correctamente ({len(fragmentos)} párrafos guardados).")
                         
                     except Exception as e:
-                        # ACÁ ESTÁ EL CÓDIGO NUEVO PARA VER EL ERROR REAL
                         st.error(f"⚠️ Error técnico con {uploaded_file.name}: {str(e)}")
                 
                 st.info("¡Proceso terminado! Ya podés ir a la Pestaña 1 para hacer tus consultas jurídicas.")
