@@ -17,7 +17,7 @@ st.set_page_config(page_title="Buscador de Jurisprudencia NQN", page_icon="⚖�
 # Configurar la llave SOLO para redactar las respuestas finales
 API_KEY = st.secrets["GEMINI_API_KEY"]
 genai.configure(api_key=API_KEY)
-model = genai.GenerativeModel('gemini-1.5-flash')
+model = genai.GenerativeModel('gemini-pro')
 
 # --- MOTOR DE LECTURA 100% GRATUITO Y LOCAL ---
 # Usamos un modelo de HuggingFace optimizado para español
