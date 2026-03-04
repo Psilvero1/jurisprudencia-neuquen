@@ -90,8 +90,7 @@ with tab1:
                             st.markdown(href, unsafe_allow_html=True)
                             
                 except Exception as e:
-                    st.error(f"⚠️ Error técnico con {uploaded_file.name}: {str(e)}")
-                else:
+                    st.error(f"⚠️ Error técnico con {uploaded_file.name}: {str(e)}")                else:
             st.warning("Por favor, escribí una consulta antes de buscar.")
 
 with tab2:
